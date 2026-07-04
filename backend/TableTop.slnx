@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="TableTop.Api/TableTop.Api.csproj" />
+  <Project Path="TableTop.Core/TableTop.Core.csproj" />
+  <Project Path="TableTop.Infrastructure/TableTop.Infrastructure.csproj" />
+  <Project Path="TableTop.Tests/TableTop.Tests.csproj" />
+</Solution>
