@@ -2,10 +2,12 @@ using Microsoft.AspNetCore.SignalR;
 using TableTop.Core.Entities;
 using TableTop.Core.Interfaces;
 using TableTop.Core.Services;
-
+using TableTop.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 namespace TableTop.Api.Hubs;
 
 public class GameHub(
+    AppDbContext db,
     DiceService diceService,
     IChatMessageRepository chatMessages,
     RoomService roomService) : Hub
@@ -29,6 +31,8 @@ public class GameHub(
             history.Select(m => new { playerName = m.PlayerName, text = m.Text, sentAt = m.SentAt }));
 
         await Clients.OthersInGroup(joinCode).SendAsync("PlayerJoined", playerName);
+        var tokens = await db.MapTokens.AsNoTracking().Where(t => t.RoomId == room.Id).ToListAsync();
+        await Clients.Caller.SendAsync("MapState", room.MapUrl, tokens.Select(ToDto));
     }
 
     public async Task SendMessage(string text)
@@ -57,6 +61,53 @@ public class GameHub(
         await Clients.Group(joinCode)
             .SendAsync("MessageReceived", playerName, text, message.SentAt);
     }
+    public async Task AddToken(string name, string color)
+{
+    if (Context.Items["room"] is not string joinCode ||
+        Context.Items["roomId"] is not Guid roomId) return;
+
+    var token = new MapToken
+    {
+        Id = Guid.NewGuid(), RoomId = roomId,
+        Name = name.Trim(), Color = color,
+        X = 50, Y = 50
+    };
+    db.MapTokens.Add(token);
+    await db.SaveChangesAsync();
+
+    await Clients.Group(joinCode).SendAsync("TokenAdded", ToDto(token));
+}
+
+// Живое перетаскивание: только рассылка, БЕЗ записи в базу
+public async Task MoveToken(Guid tokenId, double x, double y)
+{
+    if (Context.Items["room"] is not string joinCode) return;
+    await Clients.OthersInGroup(joinCode).SendAsync("TokenMoved", tokenId, x, y);
+}
+
+// Фишку отпустили: фиксируем позицию в базе
+public async Task DropToken(Guid tokenId, double x, double y)
+{
+    if (Context.Items["room"] is not string joinCode) return;
+
+    var token = await db.MapTokens.FindAsync(tokenId);
+    if (token is null) return;
+
+    token.X = Math.Clamp(x, 0, 100);
+    token.Y = Math.Clamp(y, 0, 100);
+    await db.SaveChangesAsync();
+
+    await Clients.OthersInGroup(joinCode).SendAsync("TokenMoved", tokenId, token.X, token.Y);
+}
+
+public async Task RemoveToken(Guid tokenId)
+{
+    if (Context.Items["room"] is not string joinCode) return;
+    await db.MapTokens.Where(t => t.Id == tokenId).ExecuteDeleteAsync();
+    await Clients.Group(joinCode).SendAsync("TokenRemoved", tokenId);
+}
+
+private static object ToDto(MapToken t) => new { id = t.Id, name = t.Name, color = t.Color, x = t.X, y = t.Y };
 
     private async Task HandleRoll(string joinCode, string playerName, string notation)
     {

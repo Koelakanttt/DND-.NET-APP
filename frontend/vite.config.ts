@@ -10,6 +10,7 @@ export default defineConfig({
         target: 'http://localhost:5205',
         ws: true,
       },
+      '/uploads': 'http://localhost:5205',
     },
   },
 })
